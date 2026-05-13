@@ -67,7 +67,8 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: "\u004d\u0061\u0072\u006b\u0064\u006f\u0077\u006e \u7f16\u8f91\u5668",
-    backgroundColor: "#f7f4ed",
+    backgroundColor: "#131722",
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,

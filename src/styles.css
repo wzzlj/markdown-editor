@@ -71,7 +71,6 @@ textarea:focus-visible {
   --text: #131722;
   --muted: #5b6472;
   --subtle: #8792a2;
-  --grid-line: rgba(120, 133, 155, 0.15);
   --control: #ffffff;
   --control-hover: #eef3fb;
   --control-border: #cfd7e5;
@@ -86,11 +85,7 @@ textarea:focus-visible {
   height: 100%;
   overflow: hidden;
   color: var(--text);
-  background:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-    var(--app-bg);
-  background-size: 48px 48px;
+  background: var(--app-bg);
 }
 
 .app-dark {
@@ -104,7 +99,6 @@ textarea:focus-visible {
   --text: #d1d4dc;
   --muted: #9598a1;
   --subtle: #787b86;
-  --grid-line: rgba(120, 123, 134, 0.12);
   --control: #1e222d;
   --control-hover: #252a36;
   --control-border: #2a2e39;
@@ -201,38 +195,6 @@ h1 {
   padding: 0;
 }
 
-.workspace {
-  display: grid;
-  min-height: 0;
-  grid-template-columns: 48px minmax(0, 1fr);
-  border-bottom: 1px solid var(--bar-border);
-}
-
-.side-rail {
-  display: flex;
-  min-height: 0;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  border-right: 1px solid var(--bar-border);
-  padding: 10px 6px;
-  background: var(--bar-bg);
-}
-
-.rail-button {
-  width: 34px;
-  min-height: 34px;
-  padding: 0;
-  color: var(--subtle);
-  background: transparent;
-}
-
-.rail-button.active {
-  border-color: color-mix(in srgb, var(--accent) 70%, var(--control-border));
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
 .editor-shell {
   display: grid;
   min-height: 0;
@@ -246,11 +208,7 @@ h1 {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-    var(--pane-bg);
-  background-size: 32px 32px;
+  background: var(--pane-bg);
 }
 
 .pane-label {
@@ -433,19 +391,6 @@ textarea::selection,
   .toolbar-actions {
     width: 100%;
     justify-content: flex-start;
-  }
-
-  .workspace {
-    grid-template-rows: 44px minmax(0, 1fr);
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .side-rail {
-    flex-direction: row;
-    justify-content: flex-start;
-    border-right: 0;
-    border-bottom: 1px solid var(--bar-border);
-    padding: 5px 10px;
   }
 
   .markdown-preview,

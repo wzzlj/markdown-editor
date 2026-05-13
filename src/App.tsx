@@ -4,20 +4,18 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  type CompositionEvent
 } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import {
   Activity,
-  BarChart3,
   FilePlus,
-  FileText,
   FolderOpen,
   Moon,
   Save,
   SaveAll,
-  SplitSquareHorizontal,
   Sun
 } from "lucide-react";
 
@@ -37,10 +35,6 @@ const text = {
   editorLabel: "\u004d\u0061\u0072\u006b\u0064\u006f\u0077\u006e \u7f16\u8f91\u5668",
   edit: "\u7f16\u8f91",
   preview: "\u9884\u89c8",
-  workspace: "\u5de5\u4f5c\u53f0",
-  markdownView: "\u004d\u0061\u0072\u006b\u0064\u006f\u0077\u006e \u89c6\u56fe",
-  splitView: "\u5206\u680f\u89c6\u56fe",
-  livePreview: "\u5b9e\u65f6\u9884\u89c8",
   source: "\u6e90\u6587",
   rendered: "\u6e32\u67d3",
   lines: "\u884c",
@@ -65,6 +59,17 @@ console.log("Hello Markdown");
 \`\`\`
 `;
 
+const defaultEditorFontSize = 14;
+const minEditorFontSize = 12;
+const maxEditorFontSize = 22;
+const maxUndoHistory = 100;
+
+type EditorSnapshot = {
+  content: string;
+  selectionStart: number;
+  selectionEnd: number;
+};
+
 function getFileName(filePath: string | null) {
   if (!filePath) {
     return text.untitled;
@@ -77,10 +82,16 @@ export default function App() {
   const [content, setContent] = useState(starterMarkdown);
   const [filePath, setFilePath] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
-  const [isDark, setIsDark] = useState(true);
+  const [isDark, setIsDark] = useState(false);
+  const [editorFontSize, setEditorFontSize] = useState(defaultEditorFontSize);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const previewRef = useRef<HTMLElement | null>(null);
   const isSyncingScrollRef = useRef(false);
+  const savedContentRef = useRef(starterMarkdown);
+  const undoHistoryRef = useRef<EditorSnapshot[]>([]);
+  const isComposingRef = useRef(false);
+  const compositionSnapshotRef = useRef<EditorSnapshot | null>(null);
+  const ignoreNextChangeValueRef = useRef<string | null>(null);
 
   const previewHtml = useMemo(() => {
     const html = marked.parse(content, { breaks: true }) as string;
@@ -124,13 +135,119 @@ export default function App() {
     });
   }, [content, filePath, isDirty]);
 
-  async function handleNewFile() {
+  const restoreEditorSelection = useCallback((start: number, end: number) => {
+    window.requestAnimationFrame(() => {
+      const editor = editorRef.current;
+
+      if (!editor) {
+        return;
+      }
+
+      editor.focus();
+      editor.setSelectionRange(start, end);
+    });
+  }, []);
+
+  const appendUndoSnapshot = useCallback((snapshot: EditorSnapshot) => {
+    const latestSnapshot = undoHistoryRef.current[undoHistoryRef.current.length - 1];
+
+    if (
+      latestSnapshot?.content === snapshot.content &&
+      latestSnapshot.selectionStart === snapshot.selectionStart &&
+      latestSnapshot.selectionEnd === snapshot.selectionEnd
+    ) {
+      return;
+    }
+
+    undoHistoryRef.current = [...undoHistoryRef.current, snapshot].slice(-maxUndoHistory);
+  }, []);
+
+  const recordUndoSnapshot = useCallback(() => {
+    const editor = editorRef.current;
+
+    appendUndoSnapshot({
+      content,
+      selectionStart: editor?.selectionStart ?? content.length,
+      selectionEnd: editor?.selectionEnd ?? content.length
+    });
+  }, [appendUndoSnapshot, content]);
+
+  const updateComposingContent = useCallback((nextContent: string) => {
+    setContent(nextContent);
+    setIsDirty(nextContent !== savedContentRef.current);
+  }, []);
+
+  const commitEditorContent = useCallback(
+    (nextContent: string, selectionStart?: number, selectionEnd?: number) => {
+      if (nextContent === content) {
+        return;
+      }
+
+      recordUndoSnapshot();
+      setContent(nextContent);
+      setIsDirty(nextContent !== savedContentRef.current);
+
+      if (selectionStart !== undefined && selectionEnd !== undefined) {
+        restoreEditorSelection(selectionStart, selectionEnd);
+      }
+    },
+    [content, recordUndoSnapshot, restoreEditorSelection]
+  );
+
+  const handleUndo = useCallback(() => {
+    const snapshot = undoHistoryRef.current[undoHistoryRef.current.length - 1];
+
+    if (!snapshot) {
+      return false;
+    }
+
+    undoHistoryRef.current = undoHistoryRef.current.slice(0, -1);
+    setContent(snapshot.content);
+    setIsDirty(snapshot.content !== savedContentRef.current);
+    restoreEditorSelection(snapshot.selectionStart, snapshot.selectionEnd);
+    return true;
+  }, [restoreEditorSelection]);
+
+  const handleCompositionStart = useCallback(
+    (event: CompositionEvent<HTMLTextAreaElement>) => {
+      isComposingRef.current = true;
+      compositionSnapshotRef.current = {
+        content,
+        selectionStart: event.currentTarget.selectionStart,
+        selectionEnd: event.currentTarget.selectionEnd
+      };
+    },
+    [content]
+  );
+
+  const handleCompositionEnd = useCallback(
+    (event: CompositionEvent<HTMLTextAreaElement>) => {
+      const nextContent = event.currentTarget.value;
+      const snapshot = compositionSnapshotRef.current;
+
+      isComposingRef.current = false;
+      compositionSnapshotRef.current = null;
+      ignoreNextChangeValueRef.current = nextContent;
+
+      if (snapshot && snapshot.content !== nextContent) {
+        appendUndoSnapshot(snapshot);
+      }
+
+      setContent(nextContent);
+      setIsDirty(nextContent !== savedContentRef.current);
+    },
+    [appendUndoSnapshot]
+  );
+
+  const handleNewFile = useCallback(async () => {
     setContent("");
     setFilePath(null);
+    savedContentRef.current = "";
+    undoHistoryRef.current = [];
     setIsDirty(false);
-  }
+  }, []);
 
-  async function handleOpenFile() {
+  const handleOpenFile = useCallback(async () => {
     const result = await window.markdownApi.openFile();
 
     if (!result) {
@@ -139,10 +256,12 @@ export default function App() {
 
     setContent(result.content);
     setFilePath(result.filePath);
+    savedContentRef.current = result.content;
+    undoHistoryRef.current = [];
     setIsDirty(false);
-  }
+  }, []);
 
-  async function handleSaveFile() {
+  const handleSaveFile = useCallback(async () => {
     const result = await window.markdownApi.saveFile({
       filePath,
       content
@@ -153,10 +272,12 @@ export default function App() {
     }
 
     setFilePath(result.filePath);
+    savedContentRef.current = content;
+    undoHistoryRef.current = [];
     setIsDirty(false);
-  }
+  }, [content, filePath]);
 
-  async function handleSaveAsFile() {
+  const handleSaveAsFile = useCallback(async () => {
     const result = await window.markdownApi.saveFileAs({ content });
 
     if (!result) {
@@ -164,8 +285,220 @@ export default function App() {
     }
 
     setFilePath(result.filePath);
+    savedContentRef.current = content;
+    undoHistoryRef.current = [];
     setIsDirty(false);
-  }
+  }, [content]);
+
+  const handleToggleTheme = useCallback(() => {
+    setIsDark((current) => !current);
+  }, []);
+
+  const toggleMarkdownWrapper = useCallback(
+    (prefix: string, suffix: string, fallback: string) => {
+      const editor = editorRef.current;
+
+      if (!editor) {
+        return;
+      }
+
+      const start = editor.selectionStart;
+      const end = editor.selectionEnd;
+      const selectedText = content.slice(start, end) || fallback;
+      const hasWrapper =
+        selectedText.startsWith(prefix) &&
+        selectedText.endsWith(suffix) &&
+        selectedText.length >= prefix.length + suffix.length;
+      const isBoldOnlySelection =
+        prefix === "*" &&
+        selectedText.startsWith("**") &&
+        selectedText.endsWith("**") &&
+        !selectedText.startsWith("***") &&
+        !selectedText.endsWith("***");
+
+      if (hasWrapper && !isBoldOnlySelection) {
+        const unwrappedText = selectedText.slice(prefix.length, selectedText.length - suffix.length);
+        const nextContent =
+          content.slice(0, start) + unwrappedText + content.slice(end);
+
+        commitEditorContent(nextContent, start, start + unwrappedText.length);
+        return;
+      }
+
+      const wrappedText = prefix + selectedText + suffix;
+      const nextContent = content.slice(0, start) + wrappedText + content.slice(end);
+      const selectedStart = start + prefix.length;
+      const selectedEnd = selectedStart + selectedText.length;
+
+      commitEditorContent(nextContent, selectedStart, selectedEnd);
+    },
+    [commitEditorContent, content]
+  );
+
+  const insertMarkdownLink = useCallback(() => {
+    const editor = editorRef.current;
+
+    if (!editor) {
+      return;
+    }
+
+    const start = editor.selectionStart;
+    const end = editor.selectionEnd;
+    const selectedText = content.slice(start, end) || "\u94fe\u63a5\u6587\u672c";
+    const url = "https://";
+    const replacement = `[${selectedText}](${url})`;
+    const nextContent = content.slice(0, start) + replacement + content.slice(end);
+    const urlStart = start + selectedText.length + 3;
+
+    commitEditorContent(nextContent, urlStart, urlStart + url.length);
+  }, [commitEditorContent, content]);
+
+  const indentSelectedLines = useCallback(
+    (shouldOutdent: boolean) => {
+      const editor = editorRef.current;
+
+      if (!editor) {
+        return;
+      }
+
+      const start = editor.selectionStart;
+      const end = editor.selectionEnd;
+      const lineStart = content.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+      const endForLine = end > start && content[end - 1] === "\n" ? end - 1 : end;
+      const nextLineBreak = content.indexOf("\n", endForLine);
+      const lineEnd = nextLineBreak === -1 ? content.length : nextLineBreak;
+      const block = content.slice(lineStart, lineEnd);
+      const nextBlock = block
+        .split("\n")
+        .map((line) => {
+          if (shouldOutdent) {
+            return line.replace(/^ {1,2}|\t/, "");
+          }
+
+          return line.length > 0 ? `  ${line}` : line;
+        })
+        .join("\n");
+
+      commitEditorContent(
+        content.slice(0, lineStart) + nextBlock + content.slice(lineEnd),
+        lineStart,
+        lineStart + nextBlock.length
+      );
+    },
+    [commitEditorContent, content]
+  );
+
+  const changeEditorFontSize = useCallback((delta: number) => {
+    setEditorFontSize((current) =>
+      Math.min(maxEditorFontSize, Math.max(minEditorFontSize, current + delta))
+    );
+  }, []);
+
+  const resetEditorFontSize = useCallback(() => {
+    setEditorFontSize(defaultEditorFontSize);
+  }, []);
+
+  useEffect(() => {
+    function handleKeyboardShortcuts(event: KeyboardEvent) {
+      const isShortcut = event.ctrlKey || event.metaKey;
+
+      if (!isShortcut) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === "z" && !event.shiftKey) {
+        if (handleUndo()) {
+          event.preventDefault();
+        }
+
+        return;
+      }
+
+      if (key === "n") {
+        event.preventDefault();
+        void handleNewFile();
+        return;
+      }
+
+      if (key === "o") {
+        event.preventDefault();
+        void handleOpenFile();
+        return;
+      }
+
+      if (key === "s" && event.shiftKey) {
+        event.preventDefault();
+        void handleSaveAsFile();
+        return;
+      }
+
+      if (key === "s") {
+        event.preventDefault();
+        void handleSaveFile();
+        return;
+      }
+
+      if (key === ",") {
+        event.preventDefault();
+        handleToggleTheme();
+        return;
+      }
+
+      if (key === "b") {
+        event.preventDefault();
+        toggleMarkdownWrapper("**", "**", "\u52a0\u7c97\u6587\u5b57");
+        return;
+      }
+
+      if (key === "i") {
+        event.preventDefault();
+        toggleMarkdownWrapper("*", "*", "\u659c\u4f53\u6587\u5b57");
+        return;
+      }
+
+      if (key === "k") {
+        event.preventDefault();
+        insertMarkdownLink();
+        return;
+      }
+
+      if (key === "=" || key === "+") {
+        event.preventDefault();
+        changeEditorFontSize(1);
+        return;
+      }
+
+      if (key === "-") {
+        event.preventDefault();
+        changeEditorFontSize(-1);
+        return;
+      }
+
+      if (key === "0") {
+        event.preventDefault();
+        resetEditorFontSize();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyboardShortcuts);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyboardShortcuts);
+    };
+  }, [
+    changeEditorFontSize,
+    handleNewFile,
+    handleOpenFile,
+    handleSaveAsFile,
+    handleSaveFile,
+    handleToggleTheme,
+    handleUndo,
+    insertMarkdownLink,
+    resetEditorFontSize,
+    toggleMarkdownWrapper
+  ]);
 
   return (
     <main className={isDark ? "app app-dark" : "app"}>
@@ -201,7 +534,7 @@ export default function App() {
           <button
             type="button"
             className="icon-button"
-            onClick={() => setIsDark((current) => !current)}
+            onClick={handleToggleTheme}
             title={isDark ? text.switchToLight : text.switchToDark}
             aria-label={isDark ? text.switchToLight : text.switchToDark}
           >
@@ -210,62 +543,68 @@ export default function App() {
         </div>
       </header>
 
-      <div className="workspace">
-        <aside className="side-rail" aria-label={text.workspace}>
-          <button className="rail-button active" type="button" title={text.markdownView}>
-            <FileText size={20} />
-          </button>
-          <button className="rail-button" type="button" title={text.splitView}>
-            <SplitSquareHorizontal size={20} />
-          </button>
-          <button className="rail-button" type="button" title={text.livePreview}>
-            <BarChart3 size={20} />
-          </button>
-        </aside>
-
-        <section className="editor-shell" aria-label={text.editorLabel}>
-          <label className="pane editor-pane">
-            <span className="pane-label">
-              <Activity size={13} />
-              {text.source}
-            </span>
-            <textarea
-              ref={editorRef}
-              value={content}
-              spellCheck="false"
-              onScroll={(event) => {
-                if (previewRef.current) {
-                  syncScroll(event.currentTarget, previewRef.current);
-                }
-              }}
-              onChange={(event) => {
-                setContent(event.target.value);
-                setIsDirty(true);
-              }}
-            />
-          </label>
-
-          <section
-            ref={previewRef}
-            className="pane preview-pane"
-            aria-label={text.preview}
-            onScroll={(event) => {
-              if (editorRef.current) {
-                syncScroll(event.currentTarget, editorRef.current);
+      <section className="editor-shell" aria-label={text.editorLabel}>
+        <label className="pane editor-pane">
+          <span className="pane-label">
+            <Activity size={13} />
+            {text.source}
+          </span>
+          <textarea
+            ref={editorRef}
+            value={content}
+            style={{ fontSize: `${editorFontSize}px` }}
+            spellCheck="false"
+            onKeyDown={(event) => {
+              if (event.key === "Tab") {
+                event.preventDefault();
+                indentSelectedLines(event.shiftKey);
               }
             }}
-          >
-            <span className="pane-label">
-              <Activity size={13} />
-              {text.rendered}
-            </span>
-            <article
-              className="markdown-preview"
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
-            />
-          </section>
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            onScroll={(event) => {
+              if (previewRef.current) {
+                syncScroll(event.currentTarget, previewRef.current);
+              }
+            }}
+            onChange={(event) => {
+              if (isComposingRef.current) {
+                updateComposingContent(event.target.value);
+                return;
+              }
+
+              if (ignoreNextChangeValueRef.current === event.target.value) {
+                ignoreNextChangeValueRef.current = null;
+                updateComposingContent(event.target.value);
+                return;
+              }
+
+              commitEditorContent(event.target.value);
+            }}
+          />
+        </label>
+
+        <section
+          ref={previewRef}
+          className="pane preview-pane"
+          aria-label={text.preview}
+          onScroll={(event) => {
+            if (editorRef.current) {
+              syncScroll(event.currentTarget, editorRef.current);
+            }
+          }}
+        >
+          <span className="pane-label">
+            <Activity size={13} />
+            {text.rendered}
+          </span>
+          <article
+            className="markdown-preview"
+            style={{ fontSize: `${editorFontSize}px` }}
+            dangerouslySetInnerHTML={{ __html: previewHtml }}
+          />
         </section>
-      </div>
+      </section>
 
       <footer className="status-bar">
         <span className={isDirty ? "status-pill status-warning" : "status-pill status-ok"}>
