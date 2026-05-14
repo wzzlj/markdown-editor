@@ -11,9 +11,11 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import {
   Activity,
+  Check,
   FilePlus,
   FolderOpen,
   Moon,
+  Palette,
   Save,
   SaveAll,
   Sun
@@ -30,6 +32,8 @@ const text = {
   new: "\u65b0\u5efa",
   open: "\u6253\u5f00",
   save: "\u4fdd\u5b58",
+  previewTheme: "\u9884\u89c8\u4e3b\u9898",
+  choosePreviewTheme: "\u9009\u62e9\u9884\u89c8\u4e3b\u9898",
   switchToLight: "\u5207\u6362\u5230\u6d45\u8272\u6a21\u5f0f",
   switchToDark: "\u5207\u6362\u5230\u6df1\u8272\u6a21\u5f0f",
   editorLabel: "\u004d\u0061\u0072\u006b\u0064\u006f\u0077\u006e \u7f16\u8f91\u5668",
@@ -63,12 +67,36 @@ const defaultEditorFontSize = 14;
 const minEditorFontSize = 12;
 const maxEditorFontSize = 22;
 const maxUndoHistory = 100;
+const previewThemeStorageKey = "markdown-studio-preview-theme";
+const appIconUrl = new URL("../assets/app.svg", import.meta.url).href;
+
+const previewThemes = [
+  { id: "default", name: "\u9ed8\u8ba4" },
+  { id: "github", name: "\u0047\u0069\u0074\u0048\u0075\u0062" },
+  { id: "docs", name: "\u6587\u6863" },
+  { id: "blog", name: "\u535a\u5ba2" }
+] as const;
+
+type PreviewThemeId = (typeof previewThemes)[number]["id"];
 
 type EditorSnapshot = {
   content: string;
   selectionStart: number;
   selectionEnd: number;
 };
+
+function isPreviewThemeId(value: string | null): value is PreviewThemeId {
+  return previewThemes.some((theme) => theme.id === value);
+}
+
+function getStoredPreviewTheme(): PreviewThemeId {
+  try {
+    const storedTheme = window.localStorage.getItem(previewThemeStorageKey);
+    return isPreviewThemeId(storedTheme) ? storedTheme : "default";
+  } catch {
+    return "default";
+  }
+}
 
 function getFileName(filePath: string | null) {
   if (!filePath) {
@@ -83,9 +111,13 @@ export default function App() {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [isDark, setIsDark] = useState(false);
+  const [previewTheme, setPreviewTheme] = useState<PreviewThemeId>(getStoredPreviewTheme);
+  const [isPreviewThemeMenuOpen, setIsPreviewThemeMenuOpen] = useState(false);
   const [editorFontSize, setEditorFontSize] = useState(defaultEditorFontSize);
   const editorRef = useRef<HTMLTextAreaElement | null>(null);
   const previewRef = useRef<HTMLElement | null>(null);
+  const previewThemeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const previewThemeMenuRef = useRef<HTMLDivElement | null>(null);
   const isSyncingScrollRef = useRef(false);
   const savedContentRef = useRef(starterMarkdown);
   const undoHistoryRef = useRef<EditorSnapshot[]>([]);
@@ -101,6 +133,7 @@ export default function App() {
   const fileName = getFileName(filePath);
   const lineCount = content.length === 0 ? 1 : content.split(/\r\n|\r|\n/).length;
   const characterCount = content.length;
+  const activePreviewTheme = previewThemes.find((theme) => theme.id === previewTheme) ?? previewThemes[0];
 
   const syncScroll = useCallback((source: HTMLElement, target: HTMLElement) => {
     if (isSyncingScrollRef.current) {
@@ -134,6 +167,48 @@ export default function App() {
       isDirty
     });
   }, [content, filePath, isDirty]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(previewThemeStorageKey, previewTheme);
+    } catch {
+      // Theme persistence is a convenience; the editor still works without storage access.
+    }
+  }, [previewTheme]);
+
+  useEffect(() => {
+    if (!isPreviewThemeMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+
+      if (
+        previewThemeButtonRef.current?.contains(target) ||
+        previewThemeMenuRef.current?.contains(target)
+      ) {
+        return;
+      }
+
+      setIsPreviewThemeMenuOpen(false);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsPreviewThemeMenuOpen(false);
+        previewThemeButtonRef.current?.focus();
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [isPreviewThemeMenuOpen]);
 
   const restoreEditorSelection = useCallback((start: number, end: number) => {
     window.requestAnimationFrame(() => {
@@ -292,6 +367,12 @@ export default function App() {
 
   const handleToggleTheme = useCallback(() => {
     setIsDark((current) => !current);
+  }, []);
+
+  const handleSelectPreviewTheme = useCallback((themeId: PreviewThemeId) => {
+    setPreviewTheme(themeId);
+    setIsPreviewThemeMenuOpen(false);
+    previewThemeButtonRef.current?.focus();
   }, []);
 
   const toggleMarkdownWrapper = useCallback(
@@ -504,7 +585,9 @@ export default function App() {
     <main className={isDark ? "app app-dark" : "app"}>
       <header className="toolbar">
         <div className="brand-strip">
-          <span className="brand-mark">MD</span>
+          <span className="brand-mark" aria-hidden="true">
+            <img className="brand-icon" src={appIconUrl} alt="" />
+          </span>
           <div className="title-block">
             <span className="eyebrow">{text.appName}</span>
             <h1 title={fileName}>
@@ -540,6 +623,42 @@ export default function App() {
           >
             {isDark ? <Sun size={18} /> : <Moon size={18} />}
           </button>
+          <div className="theme-picker">
+            <button
+              ref={previewThemeButtonRef}
+              type="button"
+              className="theme-picker-button"
+              onClick={() => {
+                setIsPreviewThemeMenuOpen((current) => !current);
+              }}
+              title={`${text.previewTheme}: ${activePreviewTheme.name}`}
+              aria-label={text.choosePreviewTheme}
+              aria-haspopup="menu"
+              aria-expanded={isPreviewThemeMenuOpen}
+            >
+              <Palette size={18} />
+              <span>{activePreviewTheme.name}</span>
+            </button>
+            {isPreviewThemeMenuOpen ? (
+              <div ref={previewThemeMenuRef} className="theme-menu" role="menu">
+                {previewThemes.map((theme) => (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    className="theme-menu-item"
+                    role="menuitemradio"
+                    aria-checked={theme.id === previewTheme}
+                    onClick={() => {
+                      handleSelectPreviewTheme(theme.id);
+                    }}
+                  >
+                    <span>{theme.name}</span>
+                    {theme.id === previewTheme ? <Check size={16} /> : null}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -586,7 +705,7 @@ export default function App() {
 
         <section
           ref={previewRef}
-          className="pane preview-pane"
+          className={`pane preview-pane preview-theme-${previewTheme}`}
           aria-label={text.preview}
           onScroll={(event) => {
             if (editorRef.current) {
@@ -599,7 +718,7 @@ export default function App() {
             {text.rendered}
           </span>
           <article
-            className="markdown-preview"
+            className={`markdown-preview markdown-theme-${previewTheme}`}
             style={{ fontSize: `${editorFontSize}px` }}
             dangerouslySetInnerHTML={{ __html: previewHtml }}
           />

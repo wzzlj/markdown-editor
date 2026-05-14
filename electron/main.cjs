@@ -3,6 +3,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 
 const isDev = !app.isPackaged && process.env.npm_lifecycle_event === "dev";
+const appIconPath = path.join(__dirname, "..", "assets", "app.ico");
 const zh = {
   openMarkdown: "\u6253\u5f00 Markdown \u6587\u4ef6",
   saveMarkdown: "\u4fdd\u5b58 Markdown \u6587\u4ef6",
@@ -67,6 +68,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: "\u004d\u0061\u0072\u006b\u0064\u006f\u0077\u006e \u7f16\u8f91\u5668",
+    icon: appIconPath,
     backgroundColor: "#131722",
     autoHideMenuBar: true,
     webPreferences: {
